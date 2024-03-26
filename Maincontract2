@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+ 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+ 
+contract Airdropper {
+    using SafeERC20 for IERC20;
+ 
+    address private owner;
+    uint256 public airdropPerAmount; // 每人每次可以领取的空投数量
+    uint256 public airdropTotalAmount; // 每人可以领取的空投总数
+    uint256 public airdropTerm; // 多久可以领取一次（单位s）,未设置则每人只能领一次
+    uint256 public airdropStartTime; // 空投开始时间（时间戳）
+    uint256 public airdropDeadline; // 空投截止时间（时间戳）
+    address public tokenAddress; // 空投token地址
+    mapping(address => uint256) public airdropRecord; // 每个人空投领取总额
+    mapping(address => uint256) public airdropTimeRecord; // 最后一次领取空投时间
+     mapping(address => bool) public whitelist; // 白名单映射
+ 
+    // 发布合约时需传入5个参数，注意精度问题
+    constructor(uint256 _airdropPerAmount, uint256 _airdropTotalAmount, uint256 _airdropTerm, uint256 _airdropStartTime, uint256 _airdropDeadline) {
+        owner = msg.sender;
+        airdropPerAmount = _airdropPerAmount;
+        airdropTotalAmount = _airdropTotalAmount;
+        airdropTerm = _airdropTerm;
+        airdropStartTime = _airdropStartTime;
+        airdropDeadline = _airdropDeadline;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Airdropper: Caller is not the owner");
+        _;
+    }
+ 
+    // 批量发放空投，dests和values两个数组长度若相等，则给不同地址发放对应数量token，如果values只有一个元素，则每个地址发放等量token
+    function doAirdrop(address[] memory dests, uint256[] memory values) external virtual returns (uint256) {
+        // 批量发放一般为官方操作，不受时间、领取额度等以上各种条件限制
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        require(tokenAddress != address(0), 'Airdropper: address not zero');
+        uint256 i = 0;
+        while (i < dests.length) {
+            uint sendAmount = values.length == 1 ? values[0] : values[i];
+            // 判断当前合约中剩余token是否够发放数量，如果不够则结束发放并返回已发放的最后一个索引
+            if(ERC20(tokenAddress).balanceOf(address(this)) < sendAmount){
+                break;
+            }
+            // 接收地址不为0，发放数量不为0，则执行发放
+            if(dests[i] != address(0) && sendAmount > 0){
+                IERC20(tokenAddress).safeTransfer(dests[i], sendAmount);
+            }
+            
+            i++;
+        }
+        return i;
+    }
+ 
+    // 个人领取空投
+    function getAirdrop() external virtual returns(bool){
+        require(whitelist[msg.sender], "Airdropper: not in whitelist"); // 确保只有白名单上的地址可以领取空投
+        // token地址不能为0地址
+        require(tokenAddress != address(0), 'Airdropper: address not zero');
+        // 每人每次可以领取的空投数量要大于0
+        require(airdropPerAmount > 0, 'Airdropper: no parameter set');
+        // 当前时间要大于空投开始时间
+        require(block.timestamp >= airdropStartTime, 'Airdropper: not started');
+        if(airdropTotalAmount > 0){
+            // 如果设置了 每人可以领取的空投总数 这个参数，则验证已领取数量要小于这个总数
+            require(airdropRecord[msg.sender] < airdropTotalAmount, 'Airdropper: total amount limit');
+        }
+        if (airdropTerm > 0) {
+            // 如果设置了领取周期参数，则验证当前时间减去上次领取时间大于这个周期
+            require(block.timestamp - airdropTimeRecord[msg.sender] > airdropTerm , 'Airdropper: term limit');
+        } else {
+            // 如果没有设置周期参数，则验证没有领取过可以领取，只能领1次
+            require(airdropRecord[msg.sender] == 0, 'Airdropper: you have already received');
+        }
+        if (airdropDeadline > 0) {
+            // 如果设置了空投截止时间，则验证当前时间小于截止时间
+            require(airdropDeadline > block.timestamp, 'Airdropper: deadline');
+        }
+        // 验证当前合约token数量够发放数量
+        require(ERC20(tokenAddress).balanceOf(address(this)) >= airdropPerAmount, 'Airdropper: insufficient assets');
+        // 执行发放
+        IERC20(tokenAddress).safeTransfer(msg.sender, airdropPerAmount);
+        // 累计领取总数
+        airdropRecord[msg.sender] += airdropPerAmount;
+        // 记录最后领取时间
+        airdropTimeRecord[msg.sender] = block.timestamp;
+ 
+        return true;
+    }
+ 
+     // 批量添加白名单地址
+    function addManyToWhitelist(address[] calldata users) external onlyOwner {
+        for (uint256 i = 0; i < users.length; i++) {
+            whitelist[users[i]] = true;
+        }
+    }
+
+    // 批量移除白名单地址
+    function removeManyFromWhitelist(address[] calldata users) external onlyOwner {
+        for (uint256 i = 0; i < users.length; i++) {
+            whitelist[users[i]] = false;
+        }
+    }
+
+
+    // 充入token
+    function recharge(address _tokenAddress, uint256 _amount) external onlyOwner {
+        require(_tokenAddress != address(0), "Airdropper: Token address cannot be the zero address");
+        IERC20(_tokenAddress).safeTransferFrom(msg.sender, address(this), _amount);
+    }
+
+    function setTokenAddress(address _newTokenAddress) external onlyOwner {
+        require(_newTokenAddress != address(0), "Airdropper: Token address cannot be the zero address");
+        tokenAddress = _newTokenAddress;
+    }
+ 
+    // 提出剩余token
+    function withdraw() external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        require(tokenAddress != address(0), 'Airdropper: address not zero');
+        // 将剩余token全部转给合约发布者
+        IERC20(tokenAddress).safeTransfer(owner, ERC20(tokenAddress).balanceOf(address(this)));
+        tokenAddress = address(0); // 重置token地址
+ 
+        return true;
+    }
+ 
+    /**
+     * 以下是配置各个参数的接口，只有合约发布者可以调用
+     */
+    function setPerAmount(uint256 _airdropPerAmount) external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        airdropPerAmount = _airdropPerAmount;
+ 
+        return true;
+    }
+ 
+    function setTotalAmount(uint256 _airdropTotalAmount) external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        airdropTotalAmount = _airdropTotalAmount;
+ 
+        return true;
+    }
+ 
+    function setTerm(uint256 _airdropTerm) external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        airdropTerm = _airdropTerm;
+ 
+        return true;
+    }
+ 
+    function setStartTime(uint256 _airdropStartTime) external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        airdropStartTime = _airdropStartTime;
+ 
+        return true;
+    }
+ 
+    function setDeadline(uint256 _airdropDeadline) external virtual returns(bool) {
+        require(msg.sender == owner, 'Airdropper: forbidden');
+        airdropDeadline = _airdropDeadline;
+ 
+        return true;
+    }
+ 
+}
