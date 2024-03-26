@@ -17,7 +17,7 @@ contract Airdropper {
     address public tokenAddress; // 空投token地址
     mapping(address => uint256) public airdropRecord; // 每个人空投领取总额
     mapping(address => uint256) public airdropTimeRecord; // 最后一次领取空投时间
-    mapping(address => bool) public whitelist; // 白名单映射
+     mapping(address => bool) public whitelist; // 白名单映射
  
     // 发布合约时需传入5个参数，注意精度问题
     constructor(uint256 _airdropPerAmount, uint256 _airdropTotalAmount, uint256 _airdropTerm, uint256 _airdropStartTime, uint256 _airdropDeadline) {
@@ -27,6 +27,11 @@ contract Airdropper {
         airdropTerm = _airdropTerm;
         airdropStartTime = _airdropStartTime;
         airdropDeadline = _airdropDeadline;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Airdropper: Caller is not the owner");
+        _;
     }
  
     // 批量发放空投，dests和values两个数组长度若相等，则给不同地址发放对应数量token，如果values只有一个元素，则每个地址发放等量token
@@ -100,20 +105,14 @@ contract Airdropper {
     }
 
     // 充入token
-    function recharge(address _tokenAddress, uint256 _amount) external virtual returns(bool) {
-        require(msg.sender == owner, 'Airdropper: forbidden');
-        require(_tokenAddress != address(0), 'Airdropper: forbidden');
-        if(tokenAddress == address(0)){
-            // 第一次充入，配置token地址
-            tokenAddress = _tokenAddress;
-        } else {
-            // 否则验证充入的token和配置的地址一致
-            require(_tokenAddress == tokenAddress, 'Airdropper: Error token address');
-        }
-        // 执行充入token
-        IERC20(tokenAddress).safeTransferFrom(msg.sender, address(this), _amount);
- 
-        return true;
+    function recharge(address _tokenAddress, uint256 _amount) external onlyOwner {
+        require(_tokenAddress != address(0), "Airdropper: Token address cannot be the zero address");
+        IERC20(_tokenAddress).safeTransferFrom(msg.sender, address(this), _amount);
+    }
+
+    function setTokenAddress(address _newTokenAddress) external onlyOwner {
+        require(_newTokenAddress != address(0), "Airdropper: Token address cannot be the zero address");
+        tokenAddress = _newTokenAddress;
     }
  
     // 提出剩余token
