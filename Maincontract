@@ -17,7 +17,7 @@ contract Airdropper {
     address public tokenAddress; // 空投token地址
     mapping(address => uint256) public airdropRecord; // 每个人空投领取总额
     mapping(address => uint256) public airdropTimeRecord; // 最后一次领取空投时间
-     mapping(address => bool) public whitelist; // 白名单映射
+    mapping(address => bool) public whitelist; // 白名单映射
  
     // 发布合约时需传入5个参数，注意精度问题
     constructor(uint256 _airdropPerAmount, uint256 _airdropTotalAmount, uint256 _airdropTerm, uint256 _airdropStartTime, uint256 _airdropDeadline) {
